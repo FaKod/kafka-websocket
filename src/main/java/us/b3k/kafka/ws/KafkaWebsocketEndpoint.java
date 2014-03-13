@@ -44,11 +44,11 @@ import java.util.Map;
 import java.util.Properties;
 
 @ServerEndpoint(
-    value = "/v1/topics/{topics}",
-    subprotocols = {"kafka-text", "kafka-binary"},
-    decoders = {BinaryMessageDecoder.class, TextMessageDecoder.class},
-    encoders = {BinaryMessageEncoder.class, TextMessageEncoder.class},
-    configurator = KafkaWebsocketEndpoint.Configurator.class
+        value = "/v1/topics/{topics}",
+        subprotocols = {"kafka-text", "kafka-binary"},
+        decoders = {BinaryMessageDecoder.class, TextMessageDecoder.class},
+        encoders = {BinaryMessageEncoder.class, TextMessageEncoder.class},
+        configurator = KafkaWebsocketEndpoint.Configurator.class
 )
 public class KafkaWebsocketEndpoint {
     private static Logger LOG = LoggerFactory.getLogger(KafkaWebsocketEndpoint.class);
@@ -56,14 +56,15 @@ public class KafkaWebsocketEndpoint {
     private Properties configProps;
     private KafkaConsumer consumer = null;
 
-    public static Map<String, String> getQueryMap(String query)
-    {
-        String[] params = query.split("&");
+    public static Map<String, String> getQueryMap(String query) {
+
         Map<String, String> map = Maps.newHashMap();
-        for (String param : params)
-        {
-            String[] nameval = param.split("=");
-            map.put(nameval[0], nameval[1]);
+        if (query != null) {
+            String[] params = query.split("&");
+            for (String param : params) {
+                String[] nameval = param.split("=");
+                map.put(nameval[0], nameval[1]);
+            }
         }
         return map;
     }
@@ -83,8 +84,8 @@ public class KafkaWebsocketEndpoint {
             groupId = queryParams.get("group.id");
         } else {
             groupId = sessionProps.getProperty("group.id") + "-" +
-                                    session.getId() + "-" +
-                                    String.valueOf(System.currentTimeMillis());
+                    session.getId() + "-" +
+                    String.valueOf(System.currentTimeMillis());
         }
         sessionProps.setProperty("group.id", groupId);
 
@@ -124,8 +125,7 @@ public class KafkaWebsocketEndpoint {
         }
     }
 
-    public static class Configurator extends ServerEndpointConfig.Configurator
-    {
+    public static class Configurator extends ServerEndpointConfig.Configurator {
         private static Properties consumerProps;
         private static Properties producerProps;
         private static KafkaProducer producer = null;
@@ -152,8 +152,7 @@ public class KafkaWebsocketEndpoint {
         }
 
         @Override
-        public <T> T getEndpointInstance(Class<T> endpointClass) throws InstantiationException
-        {
+        public <T> T getEndpointInstance(Class<T> endpointClass) throws InstantiationException {
             T endpoint = super.getEndpointInstance(endpointClass);
 
             if (endpoint instanceof KafkaWebsocketEndpoint) {
