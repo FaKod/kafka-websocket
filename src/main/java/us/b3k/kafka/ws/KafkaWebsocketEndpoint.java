@@ -76,6 +76,9 @@ public class KafkaWebsocketEndpoint {
     @OnOpen
     @SuppressWarnings("unchecked")
     public void onOpen(final Session session) {
+
+        session.setMaxIdleTimeout(Long.MAX_VALUE);
+
         String groupId;
 
         Properties sessionProps = (Properties) Configurator.getConsumerProps().clone();
