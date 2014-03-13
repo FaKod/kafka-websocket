@@ -116,6 +116,9 @@ public class KafkaConsumer {
                     case "kafka-text":
                         sendText(topic, message);
                         break;
+                    default:
+                        LOG.debug("Don't know how to handle SubProtcol: {}. Defaulting to 'kafka-text'", subprotocol);
+                        sendText(topic, message);
                 }
             }
         }
