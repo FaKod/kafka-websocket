@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import us.b3k.kafka.ws.messages.BinaryMessage;
 import us.b3k.kafka.ws.messages.TextMessage;
+import us.b3k.kafka.ws.transforms.Transform;
 
 import javax.websocket.CloseReason;
 import javax.websocket.RemoteEndpoint.Async;
@@ -33,23 +34,25 @@ import java.nio.charset.Charset;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class KafkaConsumer {
     private static Logger LOG = LoggerFactory.getLogger(KafkaConsumer.class);
 
-    private final ExecutorService executorService = Executors.newCachedThreadPool();
+    private final ExecutorService executorService = Executors.newFixedThreadPool(2);
 
-    private Session session;
-    private ConsumerConfig consumerConfig;
+    private final Transform transform;
+    private final Session session;
+    private final ConsumerConfig consumerConfig;
     private ConsumerConnector connector;
-    private List<String> topics;
-    private Async remoteEndpoint;
+    private final List<String> topics;
+    private final Async remoteEndpoint;
 
-    public KafkaConsumer(Properties configProps, Session session) {
+    public KafkaConsumer(Properties configProps, final String topics, final Transform transform, final Session session) {
         this.remoteEndpoint = session.getAsyncRemote();
         this.consumerConfig = new ConsumerConfig(configProps);
-        String topicString = session.getPathParameters().get("topics");
-        this.topics = Arrays.asList(topicString.split(","));
+        this.topics = Arrays.asList(topics.split(","));
+        this.transform = transform;
         this.session = session;
     }
 
@@ -67,13 +70,24 @@ public class KafkaConsumer {
             LOG.debug("Adding stream for session {}, topic {}",session.getId(), topic);
             final List<KafkaStream<byte[], byte[]>> streams = consumerMap.get(topic);
             for (KafkaStream<byte[], byte[]> stream : streams) {
-                executorService.submit(new KafkaConsumerTask(stream, remoteEndpoint, session));
+                executorService.submit(new KafkaConsumerTask(stream, remoteEndpoint, transform, session));
             }
         }
     }
 
     public void stop() {
-        LOG.debug("Stopping consumer for session {}", session.getId());
+        LOG.info("Stopping consumer for session {}", session.getId());
+        if (executorService != null) {
+            LOG.debug("Shutting down executor for session {}", session.getId());
+            executorService.shutdownNow();
+            try {
+                if (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
+                    LOG.warn("Timed out waiting for executor to exit, this could get messy.");
+                }
+            } catch (InterruptedException e) {
+                LOG.error("Error shutting down executor: {}", e.getMessage());
+            }
+        }
         connector.commitOffsets();
         try {
             Thread.sleep(5000);
@@ -81,24 +95,23 @@ public class KafkaConsumer {
             LOG.error("Exception while waiting to shutdown consumer: {}", ie.getMessage());
         }
         if (connector != null) {
-            LOG.trace("Shutting down connector for session {}", session.getId());
+            LOG.debug("Shutting down connector for session {}", session.getId());
             connector.shutdown();
         }
-        if (executorService != null) {
-            LOG.trace("Shutting down executor for session {}", session.getId());
-            executorService.shutdown();
-        }
-        LOG.debug("Stopped consumer for session {}", session.getId());
+        LOG.info("Stopped consumer for session {}", session.getId());
     }
 
     static public class KafkaConsumerTask implements Runnable {
         private KafkaStream stream;
         private Async remoteEndpoint;
-        private Session session;
+        private final Transform transform;
+        private final Session session;
 
-        public KafkaConsumerTask(KafkaStream stream, Async remoteEndpoint, Session session) {
+        public KafkaConsumerTask(KafkaStream stream, Async remoteEndpoint,
+                                 final Transform transform, final Session session) {
             this.stream = stream;
             this.remoteEndpoint = remoteEndpoint;
+            this.transform = transform;
             this.session = session;
         }
 
@@ -120,16 +133,25 @@ public class KafkaConsumer {
                         LOG.debug("Don't know how to handle SubProtcol: {}. Defaulting to 'kafka-text'", subprotocol);
                         sendText(topic, message);
                 }
+                if (Thread.currentThread().isInterrupted()) {
+                    try {
+                        session.close();
+                    } catch (IOException e) {
+                        LOG.error("Error terminating session: {}", e.getMessage());
+                    }
+                    return;
+                }
             }
         }
 
         private void sendBinary(String topic, byte[] message) {
-            remoteEndpoint.sendObject(new BinaryMessage(topic, message));
+            remoteEndpoint.sendObject(transform.transform(new BinaryMessage(topic, message), session));
         }
 
         private void sendText(String topic, byte[] message) {
             String messageString = new String(message, Charset.forName("UTF-8"));
-            remoteEndpoint.sendObject(new TextMessage(topic, messageString));
+            LOG.trace("XXX Sending text message to remote endpoint: {} {}", topic, messageString);
+            remoteEndpoint.sendObject(transform.transform(new TextMessage(topic, messageString), session));
         }
 
         private void closeSession(Exception e) {
